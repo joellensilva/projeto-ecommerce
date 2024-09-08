@@ -1,10 +1,14 @@
 package com.projeto.ecommerce.controller;
 
+import com.projeto.ecommerce.exception.BadRequestException;
+import com.projeto.ecommerce.exception.ResourceNotFoundException;
+import com.projeto.ecommerce.model.ItemVenda;
 import com.projeto.ecommerce.model.Venda;
 import com.projeto.ecommerce.service.ProdutoService;
 import com.projeto.ecommerce.service.VendaService;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -18,25 +22,29 @@ public class VendaController {
 
     @Autowired
     private ProdutoService produtoService;
+
+    @Autowired
     private VendaService vendaService;
 
-
     @PostMapping
-    public ResponseEntity<Venda> criarVenda(@RequestBody Venda venda) {
+    public ResponseEntity<Venda> criarVenda(@RequestBody List<ItemVenda> itensVenda) {
         try {
-            Venda novaVenda = produtoService.criarVenda(venda);
+            Venda novaVenda = produtoService.realizarVenda(itensVenda);
             return new ResponseEntity<>(novaVenda, HttpStatus.CREATED);
         } catch (RuntimeException e) {
+            System.err.println(e);
             return new ResponseEntity<>(null, HttpStatus.BAD_REQUEST);
         }
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Venda> atualizarVenda(@PathVariable Long id, @RequestBody Venda vendaAtualizada) {
+    public ResponseEntity<Venda> atualizarVenda(@PathVariable Long id, @RequestBody List<ItemVenda> itensAtualizados) {
         try {
-            Venda venda = produtoService.atualizarVenda(id, vendaAtualizada);
+            Venda venda = produtoService.atualizarVenda(id, itensAtualizados);
             return new ResponseEntity<>(venda, HttpStatus.OK);
-        } catch (RuntimeException e) {
+        } catch (ResourceNotFoundException e) {
+            return new ResponseEntity<>(null, HttpStatus.NOT_FOUND);
+        } catch (BadRequestException e) {
             return new ResponseEntity<>(null, HttpStatus.BAD_REQUEST);
         }
     }
@@ -69,7 +77,9 @@ public class VendaController {
 
     // Endpoint para obter vendas por data específica
     @GetMapping("/relatorio/data")
-    public List<Venda> obterVendasPorData(@RequestParam LocalDate startDate, @RequestParam LocalDate endDate) {
+    public List<Venda> obterVendasPorData(
+            @RequestParam("startDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam("startDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
         return vendaService.obterVendasPorData(startDate, endDate);
     }
 

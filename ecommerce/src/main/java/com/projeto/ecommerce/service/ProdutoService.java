@@ -2,6 +2,7 @@ package com.projeto.ecommerce.service;
 
 import com.projeto.ecommerce.exception.BadRequestException;
 import com.projeto.ecommerce.exception.ResourceNotFoundException;
+import com.projeto.ecommerce.model.ItemVenda;
 import com.projeto.ecommerce.model.Produto;
 import com.projeto.ecommerce.model.Venda;
 import com.projeto.ecommerce.repository.ProdutoRepository;
@@ -11,8 +12,10 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 public class ProdutoService {
@@ -74,42 +77,92 @@ public class ProdutoService {
         return produtoRepository.findAll();
     }
 
-    public void realizarVenda(Long produtoId, Integer quantidade) {
-        Optional<Produto> produtoOptional = produtoRepository.findById(produtoId);
-        if (produtoOptional.isPresent()) {
-            Produto produto = produtoOptional.get();
-            if (produto.getAtivo() && produto.getQuantidadeEstoque() >= quantidade) {
-                produto.setQuantidadeEstoque(produto.getQuantidadeEstoque() - quantidade);
-                produtoRepository.save(produto);
-
-                Venda venda = new Venda();
-                venda.setProduto(produto);
-                venda.setQuantidade(quantidade);
-                vendaRepository.save(venda);
-            } else {
-                throw new BadRequestException("Estoque insuficiente ou produto inativo");
-            }
-        } else {
-            throw new ResourceNotFoundException("Produto não encontrado com ID: " + produtoId);
-        }
+    @CacheEvict(value = "vendas", allEntries = true)
+    public Venda realizarVenda(List<ItemVenda> itensVenda) {
+        // Verificar se a lista de itensVenda não está vazia
+    if (itensVenda == null || itensVenda.isEmpty()) {
+        throw new BadRequestException("A venda deve ter pelo menos um item.");
     }
 
-    @CacheEvict(value = "vendas", allEntries = true)
-    public Venda criarVenda(Venda venda) {
-        if (venda.getQuantidade() >= 1 && venda.getProduto() != null) {
-            return vendaRepository.save(venda);
-        } else {
-            throw new BadRequestException("Venda deve ter pelo menos um produto");
+    // Criar a nova venda
+    Venda novaVenda = new Venda();
+    novaVenda.setDataVenda(LocalDateTime.now());
+
+    // Atualizar o estoque dos produtos e associar itens à venda
+    double valorTotal = 0.0;
+    for (ItemVenda item : itensVenda) {
+        Produto produto = produtoRepository.findById(item.getProduto().getId())
+                                           .orElseThrow(() -> new ResourceNotFoundException("Produto não encontrado com ID: " + item.getProduto().getId()));
+
+        if (!produto.getAtivo()) {
+            throw new BadRequestException("Produto inativo: " + produto.getId());
         }
+
+        if (produto.getQuantidadeEstoque() < item.getQuantidade()) {
+            throw new BadRequestException("Estoque insuficiente para o produto: " + produto.getId());
+        }
+
+        produto.setQuantidadeEstoque(produto.getQuantidadeEstoque() - item.getQuantidade());
+        produtoRepository.save(produto);
+
+        item.setVenda(novaVenda); // Associar item à venda
+        item.setProduto(produto); // Definir produto no item
+
+        valorTotal += produto.getPreco() * item.getQuantidade();
     }
 
+    novaVenda.setValorTotal(valorTotal);
+    novaVenda.setItens(itensVenda); // Associar todos os itens à venda
+
+    // Salvar a nova venda
+    return vendaRepository.save(novaVenda);
+}
+    
+
+    // @CacheEvict(value = "vendas", allEntries = true)
+    // public Venda criarVenda(Venda venda) {
+    // if (venda.getItens() != null && !venda.getItens().isEmpty()) {
+    // venda.getItens().forEach(item -> {
+    // if (item.getQuantidade() < 1 || item.getProduto() == null) {
+    // throw new BadRequestException("Cada item da venda deve ter pelo menos uma
+    // quantidade e um produto associado");
+    // }
+    // if (item.getQuantidade() > item.getProduto().getQuantidadeEstoque()) {
+    // throw new BadRequestException("Quantidade do item não pode exceder o estoque
+    // do produto");
+    // }
+    // });
+    // return vendaRepository.save(venda);
+    // } else {
+    // throw new BadRequestException("Venda deve ter pelo menos um item");
+    // }
+    // }
+
     @CacheEvict(value = "vendas", allEntries = true)
-    public Venda atualizarVenda(Long id, Venda vendaAtualizada) {
+    public Venda atualizarVenda(Long id, List<ItemVenda> itensAtualizados) {
         Optional<Venda> vendaExistente = vendaRepository.findById(id);
         if (vendaExistente.isPresent()) {
             Venda venda = vendaExistente.get();
-            venda.setProduto(vendaAtualizada.getProduto());
-            venda.setQuantidade(vendaAtualizada.getQuantidade());
+
+            // Validar e atualizar o estoque de cada produto
+            for (ItemVenda item : itensAtualizados) {
+                Optional<Produto> produtoOptional = produtoRepository.findById(item.getProduto().getId());
+                if (produtoOptional.isPresent()) {
+                    Produto produto = produtoOptional.get();
+                    if (produto.getAtivo() && produto.getQuantidadeEstoque() >= item.getQuantidade()) {
+                        produto.setQuantidadeEstoque(produto.getQuantidadeEstoque() - item.getQuantidade());
+                        produtoRepository.save(produto);
+                    } else {
+                        throw new BadRequestException(
+                                "Estoque insuficiente ou produto inativo para o produto ID: " + produto.getId());
+                    }
+                } else {
+                    throw new ResourceNotFoundException("Produto não encontrado com ID: " + item.getProduto().getId());
+                }
+            }
+
+            venda.setItens(itensAtualizados);
+            venda.setDataVenda(LocalDateTime.now());
             return vendaRepository.save(venda);
         } else {
             throw new ResourceNotFoundException("Venda não encontrada com ID: " + id);

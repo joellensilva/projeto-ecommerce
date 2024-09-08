@@ -49,6 +49,4 @@ public class GlobalExceptionHandler {
         );
         return new ResponseEntity<>(erroResponse, HttpStatus.BAD_REQUEST);
     }
-
-    // Adicione mais manipuladores de exceção conforme necessário
 }
